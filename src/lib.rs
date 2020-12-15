@@ -39,30 +39,19 @@ impl BedFile {
 
         // annotate the BedRecord
         if let Some(ref line) = self.last {
-            let mut parts = line.split_ascii_whitespace();
-            let chrom = parts.next().expect("expected at least 5 fields");
-            let start = parts
-                .next()
-                .expect("expected at least 5 fields")
-                .parse()
-                .unwrap();
-            let end = parts
-                .next()
-                .expect("expected at least 5 fields")
-                .parse()
-                .unwrap();
-            let meth = parts
-                .next()
-                .expect("expected at least 5 fields")
-                .parse()
-                .unwrap();
-            let cov = parts
-                .next()
-                .expect("expected at least 5 fields")
-                .parse()
-                .unwrap();
+            let parts: Vec<&str> = line.split_ascii_whitespace().take(6).collect();
+            if parts.len() < 6 {
+                panic!("ERROR EXPECTED AT LEAST 5 FIELDS");
+            }
+            let chrom = parts[0];
+            let start = parts[1].parse().expect("col 2 must be unsigned int");
+            let end = parts[2].parse().expect("col 3 must be unsigned int");
+            let ratio = parts[3].parse().expect("col 4 must be float");
+            let meth = parts[4].parse().expect("col 5 must be unsigned int");
+            let cov = parts[5].parse().expect("col 6 must be unsigned int");
             Ok(Some(BedRecord {
                 coords: BedCoords { chrom, start, end },
+                ratio,
                 meth,
                 cov,
             }))
@@ -81,11 +70,15 @@ pub fn sync2(mut file1: BedFile, mut file2: BedFile) -> io::Result<()> {
         match (maybe_rec1.as_ref(), maybe_rec2.as_ref()) {
             (Some(rec1), Some(rec2)) => match rec1.coords.cmp(&rec2.coords) {
                 Ordering::Equal => {
+                    let meth = rec1.meth + rec2.meth;
+                    let cov = rec1.cov + rec2.cov;
+                    let ratio = meth as f32 / cov as f32;
                     println!(
                         "{}",
                         BedRecord {
-                            meth: rec1.meth + rec2.meth,
-                            cov: rec1.cov + rec2.cov,
+                            ratio,
+                            meth,
+                            cov,
                             ..maybe_rec1.unwrap()
                         }
                     );
@@ -117,6 +110,7 @@ pub fn sync2(mut file1: BedFile, mut file2: BedFile) -> io::Result<()> {
 #[derive(Debug)]
 pub struct BedRecord<'a> {
     coords: BedCoords<'a>,
+    ratio: f32,
     meth: u32,
     cov: u32,
 }
@@ -125,8 +119,8 @@ impl<'a> fmt::Display for BedRecord<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}\t{}\t{}\t{}\t{}",
-            self.coords.chrom, self.coords.start, self.coords.end, self.meth, self.cov,
+            "{}\t{}\t{}\t{}\t{}\t{}",
+            self.coords.chrom, self.coords.start, self.coords.end, self.ratio, self.meth, self.cov,
         )
     }
 }
