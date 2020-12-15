@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::fs::File;
 use std::io::{self, BufRead};
+use std::num::{ParseFloatError, ParseIntError};
 
 pub struct BedFile {
     pub lineno: usize,
@@ -12,24 +13,93 @@ pub struct BedFile {
     at_eof: bool,
 }
 
+pub enum BedError {
+    IO(io::Error),
+    File(String, io::Error),
+    Parse(String, usize, String),
+}
+
+impl fmt::Display for BedError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BedError::IO(e) => write!(f, "An IO error occurred:\n  {}", e),
+            BedError::File(filename, e) => {
+                write!(f, "An IO error occurred with file '{}':\n  {}", filename, e)
+            }
+            BedError::Parse(filename, lineno, msg) => write!(
+                f,
+                "A parse error occurred on line {} of file '{}':\n  {}",
+                lineno, filename, msg
+            ),
+        }
+    }
+}
+
+trait ToBedErr {
+    fn bed_error(self, bf: &BedFile) -> BedError;
+}
+
+impl ToBedErr for io::Error {
+    fn bed_error(self, bf: &BedFile) -> BedError {
+        BedError::File(bf.filename.clone(), self)
+    }
+}
+
+impl ToBedErr for ParseIntError {
+    fn bed_error(self, bf: &BedFile) -> BedError {
+        BedError::Parse(
+            bf.filename.clone(),
+            bf.lineno,
+            format!("expected integer, but {}", self),
+        )
+    }
+}
+
+impl ToBedErr for ParseFloatError {
+    fn bed_error(self, bf: &BedFile) -> BedError {
+        BedError::Parse(
+            bf.filename.clone(),
+            bf.lineno,
+            format!("expected float, but {}", self),
+        )
+    }
+}
+
+trait ToBedResult<T> {
+    fn bed_result(self: Self, bf: &BedFile) -> Result<T, BedError>;
+}
+
+impl<T, E: ToBedErr> ToBedResult<T> for Result<T, E> {
+    fn bed_result(self: Self, bf: &BedFile) -> Result<T, BedError> {
+        self.map_err(|e| e.bed_error(bf))
+    }
+}
+
 impl BedFile {
-    pub fn new(filename: &str) -> io::Result<Self> {
+    pub fn new(fname: &str) -> Result<Self, BedError> {
+        let filename = fname.to_string();
+        let file = match File::open(fname) {
+            Err(io_error) => {
+                return Err(BedError::File(filename, io_error));
+            }
+            Ok(f) => io::BufReader::new(f),
+        };
         Ok(BedFile {
             lineno: 0,
             last: None,
-            filename: filename.to_string(),
-            file: io::BufReader::new(File::open(filename)?),
+            filename,
+            file,
             bufsize: 32,
             at_eof: false,
         })
     }
 
-    pub fn next(&mut self) -> io::Result<Option<BedRecord>> {
+    pub fn next(&mut self) -> Result<Option<BedRecord>, BedError> {
         if self.at_eof {
             return Ok(None);
         }
         let mut buffer = String::with_capacity(self.bufsize);
-        self.bufsize = self.file.read_line(&mut buffer)?;
+        self.bufsize = self.file.read_line(&mut buffer).bed_result(self)?;
         if self.bufsize == 0 {
             self.at_eof = true;
             return Ok(None);
@@ -41,14 +111,18 @@ impl BedFile {
         if let Some(ref line) = self.last {
             let parts: Vec<&str> = line.split_ascii_whitespace().take(6).collect();
             if parts.len() < 6 {
-                panic!("ERROR EXPECTED AT LEAST 5 FIELDS");
+                return Err(BedError::Parse(
+                    self.filename.clone(),
+                    self.lineno,
+                    format!("expected at least 6 columns, got {}", parts.len()),
+                ));
             }
             let chrom = parts[0];
-            let start = parts[1].parse().expect("col 2 must be unsigned int");
-            let end = parts[2].parse().expect("col 3 must be unsigned int");
-            let ratio = parts[3].parse().expect("col 4 must be float");
-            let meth = parts[4].parse().expect("col 5 must be unsigned int");
-            let cov = parts[5].parse().expect("col 6 must be unsigned int");
+            let start = parts[1].parse().bed_result(self)?;
+            let end = parts[2].parse().bed_result(self)?;
+            let ratio = parts[3].parse().bed_result(self)?;
+            let meth = parts[4].parse().bed_result(self)?;
+            let cov = parts[5].parse().bed_result(self)?;
             Ok(Some(BedRecord {
                 coords: BedCoords { chrom, start, end },
                 ratio,
@@ -61,8 +135,7 @@ impl BedFile {
     }
 }
 
-
-pub fn sync2(mut file1: BedFile, mut file2: BedFile) -> io::Result<()> {
+pub fn sync2(mut file1: BedFile, mut file2: BedFile) -> Result<(), BedError> {
     // assume the files are unitialized
     let mut maybe_rec1 = file1.next()?;
     let mut maybe_rec2 = file2.next()?;
