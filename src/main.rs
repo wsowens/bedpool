@@ -12,7 +12,7 @@ fn show_error<T, E: std::fmt::Display>(foo: Result<T, E>) -> T {
 
 fn main() {
     let matches = App::new("bedpool")
-        .version("0.1")
+        .version("0.2")
         .author("William Owens <wowens@ufl.edu>")
         .about("Pool 2 BED files from dmap2 together.")
         .arg(

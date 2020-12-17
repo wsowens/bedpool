@@ -145,7 +145,7 @@ pub fn sync2(mut file1: BedFile, mut file2: BedFile) -> Result<(), BedError> {
                 Ordering::Equal => {
                     let meth = rec1.meth + rec2.meth;
                     let cov = rec1.cov + rec2.cov;
-                    let ratio = meth as f32 / cov as f32;
+                    let ratio = meth / cov;
                     println!(
                         "{}",
                         BedRecord {
@@ -184,8 +184,8 @@ pub fn sync2(mut file1: BedFile, mut file2: BedFile) -> Result<(), BedError> {
 pub struct BedRecord<'a> {
     coords: BedCoords<'a>,
     ratio: f32,
-    meth: u32,
-    cov: u32,
+    meth: f32,
+    cov: f32,
 }
 
 impl<'a> fmt::Display for BedRecord<'a> {
